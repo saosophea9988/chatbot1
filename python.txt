@@ -1,0 +1,175 @@
+import schedule
+import time
+from datetime import datetime,date
+import psycopg2
+
+start_session = 8.5
+current_time = start_session
+all_batchs1 = []
+end_session_eachDay = 16.5
+
+def attendance_checking():
+    batch_each_hour = set()
+    current_local_timestamp = datetime.now()
+    student_id = []
+    global start_session
+    global end_session_eachDay
+    studentID_logID_sessionID = []
+    list_attendance = []
+    list_attendance1 = []
+    global current_time
+    global all_batchs1
+    batchID_sessionID_in_each_hour = []
+    connection = None
+
+    try:
+        #connect to postgre
+        connection = psycopg2.connect(user="postgres",password="konkhmer7",host="localhost", port="5432",database="postgres")
+        cursor = connection.cursor()
+        #select query to insert data to attendances
+        select_Query = """INSERT INTO attendance (log_id, student_id, session_id, status, date) VALUES(%s,%s,%s,%s,%s)"""
+        select_Query1 = """INSERT INTO attendance (student_id, session_id, status, date) VALUES(%s,%s,%s,%s)"""
+
+        #select query to select to emp_logs, execute and fetch it all to student_records
+        postgre_select_Query1 = """select * from log"""
+        cursor.execute(postgre_select_Query1)
+        log_records = cursor.fetchall()
+
+        # we use it to check student present between current_time and current_time + 1
+        for row in log_records:
+            # localtimestamp,
+            # a = row[3].split('+')
+            # strptime
+            time_checking1 = datetime.strftime(row[3], '%Y-%m-%d %H:%M:%S.%f')
+
+            time_checking = str(row[3].time())[0:5]
+            # time_checking1.date() == date.today() and
+
+            if ( float(time_checking.split(":")[0]) + float(int(time_checking.split(":")[1]) * (1 / 60)) > float(current_time) and float(time_checking.split(":")[0]) + float(int(time_checking.split(":")[1])) * (1 / 60) <= float(current_time + 1)):
+                studentID_logID_sessionID.append((row[1], row[0], row[2]))
+                student_id.append(row[1])
+
+        if(studentID_logID_sessionID!=[]):
+
+            # we use seen_twice to add at lease 2 time and add it into seen_twice
+            # seen = set()
+            # seen_add = seen.add
+            # seen_twice_studentID_and_logID_sessionID = set(x for x in studentID_logID_sessionID if x[0] in seen or seen_add(x[0]))
+            # print(studentID_logID_sessionID)
+
+            # for x in set(student_id):
+            #     student_id.remove(x)
+            # seen_twice_studentID = set(student_id)
+            # studentID_logID_sessionID1 = studentID_logID_sessionID.copy()
+            # for i,j in zip(studentID_logID_sessionID,len(studentID_logID_sessionID)):
+
+            seen = set()
+            seen_add = seen.add
+            seen_twice_studentID = set(x for x in student_id if x in seen or seen_add(x))
+            seen_twice_studentID_and_logID_sessionID = set()
+
+
+            for i in seen_twice_studentID:
+                for j in studentID_logID_sessionID:
+                    if(i==j[0]):
+                        seen_twice_studentID_and_logID_sessionID.add((j[0], j[1], j[2]))
+
+                        break
+            seen_oneTime_studentID_logID_sessinID = []
+            for row in studentID_logID_sessionID:
+                if (row[0] not in seen_twice_studentID):
+                    seen_oneTime_studentID_logID_sessinID.append((row[0], row[1], row[2]))
+
+            # select data from student
+            select_student_info_query = """select * from student ORDER BY id ASC"""
+            cursor.execute(select_student_info_query)
+            students_info = cursor.fetchall()
+
+            #add present people into list_batch
+            for element in seen_twice_studentID_and_logID_sessionID:
+                for row in students_info:
+                    if (element[0] == row[0]):
+                        batch_each_hour.add(row[1])
+                        batchID_sessionID_in_each_hour.append((row[1], element[2]))
+                        break
+
+            batchID_sessionID_in_each_hour_set = set()
+
+            for i in batch_each_hour:
+                for j in batchID_sessionID_in_each_hour:
+                    if(i==j[0]):
+                        batchID_sessionID_in_each_hour_set.add((j[0], j[1]))
+                        break
+
+            for row1 in seen_twice_studentID_and_logID_sessionID:
+                for row2 in students_info:
+                    if (int(row1[0]) == int(row2[0])):
+                        list_attendance.append((row1[1], row2[0], row1[2], "P", current_local_timestamp))
+                        break
+
+            # create student_id and add all student id to students_id
+            students_id1 = set()
+            for row in students_info:
+                students_id1.add(row[0])
+
+            seen_twice_and_one_studentID = set()
+            for row in seen_twice_studentID_and_logID_sessionID:
+                seen_twice_and_one_studentID.add(row[0])
+
+
+            #all seen_oneTime to attendance
+            for row2 in seen_oneTime_studentID_logID_sessinID:
+                list_attendance.append((row2[1], row2[0], row2[2], "A", current_local_timestamp))
+                seen_twice_and_one_studentID.add(row2[0])
+
+            # take absent studends id to student_id
+
+            students_id1 = students_id1 - seen_twice_and_one_studentID
+
+            if(students_id1!=()):
+                for row1 in students_info:
+                    for row2 in batchID_sessionID_in_each_hour_set:
+
+                        if((row1[0] in students_id1) and (row1[1]==row2[0])):
+                            list_attendance1.append(( row1[0], row2[1], "A", current_local_timestamp))
+                            break
+
+            #sort as batch or group into sort_batch
+            sort_studentID_for_attendance = sorted(list_attendance, key=lambda tup: tup[1])
+            # sort_studentID_for_attendance1 = sorted(list_attendance1, key=lambda tup: tup[0])
+            #execute add
+            for add in sort_studentID_for_attendance:
+                cursor.execute(select_Query,add)
+            for add in list_attendance1:
+                cursor.execute(select_Query1,add)
+            connection.commit()
+
+        #reset session, current_time to defualt at 5:30 pm and stop schedule in every hourses and truncate amp_logs at the end of the hourse in a day
+        if(current_time==end_session_eachDay):
+            all_batchs1=[]
+            current_time = start_session
+            schedule.clear("doEveryHourses")
+            print("finish")
+        else:
+            current_time = current_time + 1
+    except (Exception, psycopg2.Error) as error:
+        print("Error while connecting to PostgreSQL", error)
+
+    finally:
+        # closing database connection.
+        if (connection):
+            cursor.close()
+            connection.close()
+
+def startTime():
+    # we use tag to crear or stop running of schedule in every hours
+    schedule.every().second.do(attendance_checking).tag("doEveryHourses","job")
+
+# start session in the first time
+startTime()
+# schedule.every().day.at("10:44").do(startTime)
+while True:
+    # Checks whether a scheduled task
+    # is pending to run or not
+    schedule.run_pending()
+    time.sleep(1)
